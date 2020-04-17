@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# $ bin/compile <build-dir> <cache-dir> <env-path>
+set -eo pipefail
+
+if [ $(uname) == Darwin ]; then
+    sed() { command sed -l "$@"; }
+else
+    sed() { command sed -u "$@"; }
+fi
+
+indent() {
+  sed 's/^/       /'
+}
+
+BUILD_DIR="$1"
+CACHE_DIR="$2"
+ENV_FILE=$3
+
+DEFAULT_VERSION="1.92"
+
+ENV_VARIABLE="GIFSICLE_VERSION"
+
+ENV_VERSION="$ENV_FILE/$ENV_VARIABLE"
+
+LIBRARY="gifsicle"
+
+if [ -f "$ENV_VERSION" ]; then
+    VERSION=$(cat "$ENV_VERSION")
+else
+    VERSION="$DEFAULT_VERSION"
+fi
+
+echo "-----> Installing $LIBRARY $VERSION"
+
+VENDOR_DIR="vendor"
+VENDOR_PATH="$BUILD_DIR/$VENDOR_DIR"
+
+CACHE_PATH="$CACHE_DIR/$LIBRARY"
+CACHE_VERSION="$CACHE_PATH/version"
+
+PROFILE_PATH="$BUILD_DIR/.profile.d"
+INSTALL_PATH="$VENDOR_PATH/$LIBRARY"
+
+mkdir -p "$INSTALL_PATH"
+mkdir -p "$CACHE_DIR"
+
+echo "-----> Looking for cached version"
+
+if [ -f "$CACHE_VERSION" ]; then
+    CACHED_VERSION=$(cat "$CACHE_VERSION")
+    echo "Cached version is $CACHED_VERSION" | indent
+else
+    CACHED_VERSION=
+    echo "No cached version found" | indent
+fi
+
+if [ "$CACHED_VERSION" = "$VERSION" ]; then
+    echo "Extracting from cache" | indent
+    cp -R "$CACHE_PATH" "$VENDOR_PATH"
+else
+    echo "-----> Compiling from sources"
+
+    DOWNLOAD_URL="https://github.com/kohler/gifsicle/archive/v$VERSION.tar.gz"
+
+    echo "DOWNLOAD_URL = $DOWNLOAD_URL" | indent
+
+    curl -L --silent $DOWNLOAD_URL | tar xz
+
+    cd "$LIBRARY-$VERSION"
+
+    ./bootstrap.sh | indent
+    autoconf -i | indent
+
+    ./configure --disable-gifview --prefix="$INSTALL_PATH" | indent
+    make | indent
+    make install | indent
+
+    echo "Caching results for future builds" | indent
+    cp -R "$INSTALL_PATH" "$CACHE_PATH"
+    echo "$VERSION" > "$CACHE_VERSION"
+fi
+
+mkdir -p "$PROFILE_PATH"
+EXPORT_PATH='export PATH="$PATH:$HOME/'"$VENDOR_DIR/$LIBRARY"'/bin"'
+echo "$EXPORT_PATH" >> "$PROFILE_PATH/$LIBRARY.sh"
